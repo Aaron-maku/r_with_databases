@@ -1,0 +1,159 @@
+---
+title: "Intro to DBI"
+author: "Aaron Makubuya"
+date: "`r format(Sys.time(), tz = 'America/Los_Angeles')`"
+output:
+  html_document:
+    df_print: paged
+---
+<style type="text/css">
+body{ /* Normal  */
+      font-size: 14px;
+  }
+p {line-height: 1.5em;}
+</style>
+
+***
+DBI separates the connectivity to the DBMS into a “front-end” and a “back-end”. Applications use only the exposed front-end API. The back-end facilities that communicate with specific DBMSs (SQLite, MySQL, PostgreSQL, MonetDB, etc.) are provided by drivers (other packages) that get invoked automatically through S4 methods.
+
+The following example illustrates some of the DBI capabilities:
+
+```{r, warning=FALSE, message=FALSE}
+# Load libraries
+library(DBI)
+library(RSQLite)
+library(tidyverse)
+library(glue)
+```
+
+```{r}
+# Create an ephemeral in-memory RSQLite database
+con <- dbConnect(RSQLite::SQLite(), dbname = ":memory:")
+
+# List all tables in object con
+dbListTables(con) # returns 0 objects 
+
+# Here we write our mtcars table to our con object
+dbWriteTable(con, "mtcars", mtcars, )
+```
+
+
+```{r}
+# Now lets list the number of tables in our con object
+dbListTables(con) # now we get a list of 1 with the name we provided "mtcars"
+
+# this returns the name of all the columns in our con table 
+dbListFields(con, "mtcars")
+
+# The dbReadTable function below reads the entire table into our R session.
+table <- dbReadTable(con, "mtcars")
+table
+```
+- Here we have  our table object but we lose some data value here as we can no longer see what the make and type of the cars are. These were previously the index values.
+
+# Lets rewrite it again with a new column containing the row names
+```{r}
+# Create a new df with our row names
+df <- mtcars %>% 
+  mutate(car_make = row.names(.)) %>% 
+  select(ends_with("make"), everything())
+
+
+# now lets rewrite the table in sqlite
+dbWriteTable(con, "mtcars", df, overwrite = T)
+
+
+my_table <- dbReadTable(con, "mtcars")
+my_table
+```
+- Now we have a nice id for our car make and models. Also our data in no longer organized in some ambiguous form.
+
+
+
+# Lets run some basic Queries 
+```{r}
+######## You can fetch all results:
+query <- " Select * from mtcars where cyl = 4"
+
+# res creates the query format and connection parameters we need to pass to our db to process our query
+fetch <- dbSendQuery(con, query)
+
+
+# dbFetch processes our res object and returns our query if the res object is faulty it will render an error and close the res object result set.
+res  <- dbFetch(fetch)
+res
+
+# dbClearResult removes the result set from memory and frees up the memory for new query results.
+# dbClearResult(res)
+```
+
+
+## Lets try and return data in chunck
+```{r}
+# Or a chunk at a time
+res <- dbSendQuery(con, "SELECT * FROM mtcars WHERE cyl = 4")
+
+# while(!dbHasCompleted(res)){
+#   chunk <- dbFetch(res, n = 5)
+#   print(nrow(chunk))
+# }
+
+res_new <- NULL
+
+# while(!dbHasCompleted(res)){
+#   chunck <- dbFetch(res, n =5)
+#   res_new <- bind_rows(res_new, chunk) 
+#   print(nrow(chunk))
+# }
+
+# loop through and append tables 
+
+n = 3
+for(i in 1:n){
+  chunk <- dbFetch(res, n=5)
+  res_new <- bind_rows(res_new, chunk)
+}
+
+res_new
+# dbClearResult(res) How to close result set
+# dbDisconnect(con) How to close a connection to the db
+```
+
+- two things to notice, 1 the while loop seems to exhibit strange behavior in that it refuses to append new chunks of data to our res_new object. 2 a for loop seems to work in terms of fetching and appending our data chunks but it forces a close of our result fetching object.
+
+### Lets run some parametric queries 
+```{r}
+n <- 8
+query <- glue("select *
+              from mtcars 
+              where cyl = {n}")
+
+fetch <- dbSendStatement(con, query)
+res <- dbFetch(fetch)
+res
+```
+
+- Here use the glue function to pass our filter criteria into our sql string statement. The curly brackets make it easy for our sql statement to evaluate the n object as part of the sql statement instead of an in depended r object "n".
+
+
+## Lets window queries into our mt cars data
+```{r}
+df %>% 
+  select(car_make, mpg, cyl, hp) %>% 
+  group_by(hp) %>% 
+  mutate(row_num = row_number()) %>% 
+  arrange(hp)
+```
+- above we create a data set that gives us a Cartesian product of our hp feature ordered by the hp feature.
+
+# Lets run the same query in SQlite 
+```{r}
+query <- glue("select car_make, mpg, cyl, hp, row_number() over (partition by hp order by hp) as row_num
+               from mtcars")
+fetch <- dbSendQuery(con, query)
+res <- dbFetch(fetch)
+res
+```
+
+
+
