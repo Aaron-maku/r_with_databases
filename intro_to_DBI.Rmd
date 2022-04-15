@@ -160,10 +160,160 @@ res
 ```
 
 
+## Lets make a connection to our local Dbeaver sample database
 ```{r}
-# driver <- RSQLite::dbDriver("jdbc:sqlite:/Users/aaron/Library/DBeaverData/workspace6/.metadata/sample-database-sqlite-1/")
-# con <- dbConnect(drv = driver, dbname = "DBeaver Sample Database (SQLite)")
-# 
-# dbListTables(con)
+if(file.exists("/Users/aaron/Library/DBeaverData/workspace6/.metadata/sample-database-sqlite-1/Chinook.db")){
+  filename <- "/Users/aaron/Library/DBeaverData/workspace6/.metadata/sample-database-sqlite-1/Chinook.db"
+  sqlite.driver <- dbDriver("SQLite")
+  con <- dbConnect(sqlite.driver, dbname = filename)
+
+}
+
+dbListTables(con)
 ```
+
+-- Get all the album titles for each artist ordered by title name
+```{r}
+artis <- DBI::dbReadTable(con, "Artist")
+album <- DBI::dbReadTable(con, "Album")
+
+res <- artis %>% 
+  left_join(album, by = "ArtistId") %>% 
+  select(ArtistId, Name, Title) %>% 
+  group_by(ArtistId, Name) %>% 
+  arrange(ArtistId, Title) %>% 
+  mutate(row_num = row_number()) %>% 
+  drop_na()
+
+res
+```
+
+-- find the artists that have greater then 3 albums
+```{r}
+res %>% 
+  filter(row_num > 3) %>% 
+  select(Name) %>% 
+  distinct() %>% 
+  arrange(Name)
+```
+
+
+- Having clause R equivalent
+
+```{r}
+emp <- dbReadTable(con, "Employee")
+emp %>% 
+  mutate(BirthDate = as.Date(BirthDate),
+         Name = glue("{FirstName}_{LastName}")) %>% 
+  mutate(ReportsTo = coalesce(ReportsTo, 0)) %>% 
+  select(FirstName, LastName, Name, BirthDate) %>% 
+  group_by(FirstName, LastName, Name) %>% 
+  summarise(avg_db = mean(BirthDate), .groups = "keep") %>% 
+  filter(avg_db >= '1962-02-18')
+
+
+# query <- glue("select firstName, lastName, FirstName || '_' || LastName as Name, avg(BirthDate)
+#                From Employee
+#               group by FirstName, lastName
+#               Having  avg(BirthDate) >= 1962")
+# 
+# fetch <- dbSendQuery(con, query)
+# 
+# res <- dbFetch(fetch)
+# res
+```
+- In the above code we create a new column called Name by combining the fist and last name concatenated by the underscore string value using the glue function.
+
+
+# Case when statement
+```{r}
+invc <- dbReadTable(con, "Invoice")
+invc
+
+invc %>% 
+  select(InvoiceId, BillingCity, BillingState, BillingCountry, Total) %>% 
+  mutate(
+    invc_size = case_when(Total < 5 ~ "small invc",
+                               Total >= 5 & Total < 13 ~ "medium invc",
+                               Total >= 13 ~ "large invc",
+                              TRUE ~ "unknown")
+         )
+```
+
+# Lead window function
+
+```{r}
+cust <- dbReadTable(con, "Customer")
+
+invc %>% 
+  left_join(cust, by = "CustomerId") %>% 
+  select(CustomerId, FirstName, LastName, InvoiceDate, Total) %>% 
+  mutate(InvoiceDate = as.Date(InvoiceDate)) %>% 
+  arrange(CustomerId) %>% 
+  group_by(CustomerId) %>% 
+  mutate(next_inv_dt = lead(InvoiceDate, 1))
+```
+# Calculating dates
+```{r}
+
+invc %>% 
+  left_join(cust, by = "CustomerId") %>% 
+  select(CustomerId, FirstName, LastName, InvoiceDate, Total) %>% 
+  mutate(InvoiceDate = as.Date(InvoiceDate)) %>% 
+  arrange(CustomerId) %>% 
+  group_by(CustomerId) %>% 
+  mutate(next_inv_dt = lead(InvoiceDate, 1)) %>% 
+  mutate(days_to_next_invc = difftime(next_inv_dt, InvoiceDate, units = "days"))
+```
+# lag window function
+```{r}
+invc %>% 
+  left_join(cust, by = "CustomerId") %>% 
+  select(CustomerId, FirstName, LastName, InvoiceDate, Total) %>% 
+  mutate(InvoiceDate = as.Date(InvoiceDate)) %>% 
+  arrange(CustomerId) %>% 
+  group_by(CustomerId) %>% 
+  mutate(next_inv_dt = lead(InvoiceDate, 1)) %>% 
+  mutate(days_to_next_invc = difftime(next_inv_dt, InvoiceDate, units = "days"))
+
+
+invc %>% 
+  left_join(cust, by = "CustomerId") %>% 
+  select(CustomerId, FirstName, LastName, InvoiceDate, Total) %>% 
+  mutate(InvoiceDate = as.Date(InvoiceDate)) %>% 
+  arrange(CustomerId) %>% 
+  group_by(CustomerId) %>% 
+  mutate(last_invc_dt = lag(InvoiceDate, lag =1)) %>% # get lagged difference
+  mutate(days_since_last_invce = difftime(InvoiceDate, last_invc_dt, units = "days"))
+```
+
+
+
+```{r}
+# Use a single value to replace all missing values
+x <- sample(c(1:5, NA, NA, NA))
+coalesce(x, 0L)
+
+# Or match together a complete vector from missing pieces
+y <- c(1, 2, NA, NA, 5)
+z <- c(NA, NA, 3, 4, 5)
+coalesce(y, z)
+
+# Supply lists by with dynamic dots
+vecs <- list(
+  c(1, 2, NA, NA, 5),
+  c(NA, NA, 3, 4, 5)
+)
+```
+
+
+
+
+
+
+
+
+
+
+
 
